@@ -12,9 +12,13 @@ import { Driver } from '../drivers/driver.entity';
 
 export enum OrderStatus {
   CREATED = 'CREATED',
+  DISPATCHED = 'DISPATCHED',
   COLLECTED = 'COLLECTED',
   IN_TRANSIT = 'IN_TRANSIT',
+  OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY',
   DELIVERED = 'DELIVERED',
+  DELIVERED_FAILED = 'DELIVERED_FAILED',
+  RETURNED = 'RETURNED',
   CANCELLED = 'CANCELLED',
 }
 
