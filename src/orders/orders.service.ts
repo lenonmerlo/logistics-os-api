@@ -62,23 +62,34 @@ export class OrdersService {
   async update(id: string, updateOrderDto: UpdateOrderDto): Promise<Order> {
     const order = await this.findOne(id);
 
-    if (updateOrderDto.status) {
-      this.validateStatusTransition(order.status, updateOrderDto.status);
-      order.status = updateOrderDto.status;
-      await this.syncDriverStatus(order);
-    }
+    const previousDriver = order.driver;
 
     if (updateOrderDto.driverId) {
-      const driver = await this.driversService.findOne(updateOrderDto.driverId);
+      const newDriver = await this.driversService.findOne(
+        updateOrderDto.driverId,
+      );
 
-      if (driver.status !== DriverStatus.AVAILABLE) {
+      if (newDriver.status !== DriverStatus.AVAILABLE) {
         throw new BadRequestException('Driver is not available');
       }
 
-      order.driver = driver;
+      order.driver = newDriver;
+
+      if (previousDriver && previousDriver.id !== newDriver.id) {
+        await this.driversService.update(previousDriver.id, {
+          status: DriverStatus.AVAILABLE,
+        });
+      }
     }
 
-    if (updateOrderDto.notes) {
+    if (updateOrderDto.status) {
+      this.validateStatusTransition(order.status, updateOrderDto.status);
+      order.status = updateOrderDto.status;
+    }
+
+    await this.syncDriverStatus(order);
+
+    if (updateOrderDto.notes !== undefined) {
       order.notes = updateOrderDto.notes;
     }
 
