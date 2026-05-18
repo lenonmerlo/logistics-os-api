@@ -86,10 +86,11 @@ export class OrdersService {
   async remove(id: string): Promise<void> {
     const order = await this.findOne(id);
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
-    if (order.status !== OrderStatus.CREATED) {
+    const cancellableStatuses = [OrderStatus.CREATED, OrderStatus.DISPATCHED];
+
+    if (!cancellableStatuses.includes(order.status)) {
       throw new BadRequestException(
-        'Only orders with CREATED status can be deleted',
+        'Only orders with CREATED or DISPATCHED status can be deleted',
       );
     }
 
@@ -102,9 +103,19 @@ export class OrdersService {
   ): void {
     const validTransitions: Record<OrderStatus, OrderStatus[]> = {
       [OrderStatus.CREATED]: [OrderStatus.COLLECTED, OrderStatus.CANCELLED],
+      [OrderStatus.DISPATCHED]: [OrderStatus.COLLECTED, OrderStatus.CANCELLED],
       [OrderStatus.COLLECTED]: [OrderStatus.IN_TRANSIT, OrderStatus.CANCELLED],
-      [OrderStatus.IN_TRANSIT]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+      [OrderStatus.IN_TRANSIT]: [OrderStatus.OUT_FOR_DELIVERY],
+      [OrderStatus.OUT_FOR_DELIVERY]: [
+        OrderStatus.DELIVERED,
+        OrderStatus.DELIVERED_FAILED,
+      ],
       [OrderStatus.DELIVERED]: [],
+      [OrderStatus.DELIVERED_FAILED]: [
+        OrderStatus.RETURNED,
+        OrderStatus.CANCELLED,
+      ],
+      [OrderStatus.RETURNED]: [],
       [OrderStatus.CANCELLED]: [],
     };
 
