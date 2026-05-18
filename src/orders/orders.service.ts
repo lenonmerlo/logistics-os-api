@@ -1,16 +1,16 @@
 import {
-  BadRequestException,
   Injectable,
   NotFoundException,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ClientsService } from '../clients/clients.service';
-import { Driver, DriverStatus } from '../drivers/driver.entity';
-import { DriversService } from '../drivers/drivers.service';
+import { Order, OrderStatus } from './order.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
-import { Order, OrderStatus } from './order.entity';
+import { ClientsService } from '../clients/clients.service';
+import { DriversService } from '../drivers/drivers.service';
+import { Driver, DriverStatus } from '../drivers/driver.entity';
 
 @Injectable()
 export class OrdersService {
@@ -27,6 +27,10 @@ export class OrdersService {
     let driver: Driver | undefined = undefined;
     if (createOrderDto.driverId) {
       driver = await this.driversService.findOne(createOrderDto.driverId);
+
+      if (driver.status !== DriverStatus.AVAILABLE) {
+        throw new BadRequestException('Driver is not available');
+      }
     }
 
     const order = this.orderRepository.create({
@@ -60,6 +64,8 @@ export class OrdersService {
 
     if (updateOrderDto.status) {
       this.validateStatusTransition(order.status, updateOrderDto.status);
+      order.status = updateOrderDto.status;
+      await this.syncDriverStatus(order);
     }
 
     if (updateOrderDto.driverId) {
@@ -70,10 +76,6 @@ export class OrdersService {
       }
 
       order.driver = driver;
-    }
-
-    if (updateOrderDto.status) {
-      order.status = updateOrderDto.status;
     }
 
     if (updateOrderDto.notes) {
@@ -97,24 +99,54 @@ export class OrdersService {
     await this.orderRepository.remove(order);
   }
 
+  private async syncDriverStatus(order: Order): Promise<void> {
+    if (!order.driver) return;
+
+    const driver = await this.driversService.findOne(order.driver.id);
+
+    const onDeliveryStatuses = [
+      OrderStatus.DISPATCHED,
+      OrderStatus.COLLECTED,
+      OrderStatus.IN_TRANSIT,
+      OrderStatus.OUT_FOR_DELIVERY,
+      OrderStatus.DELIVERY_FAILED,
+    ];
+
+    const releasedStatuses = [
+      OrderStatus.DELIVERED,
+      OrderStatus.RETURNED,
+      OrderStatus.CANCELLED,
+    ];
+
+    if (onDeliveryStatuses.includes(order.status)) {
+      await this.driversService.update(driver.id, {
+        status: DriverStatus.ON_DELIVERY,
+      });
+    } else if (releasedStatuses.includes(order.status)) {
+      await this.driversService.update(driver.id, {
+        status: DriverStatus.AVAILABLE,
+      });
+    }
+  }
+
   private validateStatusTransition(
     current: OrderStatus,
     next: OrderStatus,
   ): void {
     const validTransitions: Record<OrderStatus, OrderStatus[]> = {
-      [OrderStatus.CREATED]: [OrderStatus.COLLECTED, OrderStatus.CANCELLED],
+      [OrderStatus.CREATED]: [OrderStatus.DISPATCHED, OrderStatus.CANCELLED],
       [OrderStatus.DISPATCHED]: [OrderStatus.COLLECTED, OrderStatus.CANCELLED],
-      [OrderStatus.COLLECTED]: [OrderStatus.IN_TRANSIT, OrderStatus.CANCELLED],
+      [OrderStatus.COLLECTED]: [OrderStatus.IN_TRANSIT],
       [OrderStatus.IN_TRANSIT]: [OrderStatus.OUT_FOR_DELIVERY],
       [OrderStatus.OUT_FOR_DELIVERY]: [
         OrderStatus.DELIVERED,
-        OrderStatus.DELIVERED_FAILED,
+        OrderStatus.DELIVERY_FAILED,
+      ],
+      [OrderStatus.DELIVERY_FAILED]: [
+        OrderStatus.OUT_FOR_DELIVERY,
+        OrderStatus.RETURNED,
       ],
       [OrderStatus.DELIVERED]: [],
-      [OrderStatus.DELIVERED_FAILED]: [
-        OrderStatus.RETURNED,
-        OrderStatus.CANCELLED,
-      ],
       [OrderStatus.RETURNED]: [],
       [OrderStatus.CANCELLED]: [],
     };
